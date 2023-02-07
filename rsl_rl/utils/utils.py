@@ -32,6 +32,8 @@ import os
 import git
 import pathlib
 import torch
+import jsons, json
+import yaml
 
 def split_and_pad_trajectories(tensor, dones):
     """ Splits trajectories at done indices. Then concatenates them and padds with zeros up to the length og the longest trajectory.
@@ -73,7 +75,8 @@ def unpad_trajectories(trajectories, masks):
     # Need to transpose before and after the masking to have proper reshaping
     return trajectories.transpose(1, 0)[masks.transpose(1, 0)].view(-1, trajectories.shape[0], trajectories.shape[-1]).transpose(1, 0)
 
-def store_code_state(logdir, repositories):
+def store_code_state(logdir, repositories, train_params, env_params):
+    # Log git diffs
     for repository_file_path in repositories:
         repo = git.Repo(repository_file_path, search_parent_directories=True)
         repo_name = pathlib.Path(repo.working_dir).name
@@ -81,3 +84,8 @@ def store_code_state(logdir, repositories):
         content = f"--- git status ---\n{repo.git.status()} \n\n\n--- git diff ---\n{repo.git.diff(t)}"
         with open(os.path.join(logdir, f"{repo_name}_git.diff"), "x") as f:
             f.write(content)
+    # Log params
+    with open(os.path.join(logdir, "env_params.yaml"), "x") as f:
+        yaml.dump(json.loads(jsons.dumps(env_params)), f)
+    with open(os.path.join(logdir, "train_params.yaml"), "x") as f:
+        yaml.dump(json.loads(jsons.dumps(train_params)), f)

@@ -51,6 +51,7 @@ class OnPolicyRunner:
                  log_dir=None,
                  device='cpu'):
 
+        self.train_cfg = train_cfg
         self.cfg=train_cfg["runner"]
         self.alg_cfg = train_cfg["algorithm"]
         self.policy_cfg = train_cfg["policy"]
@@ -142,7 +143,7 @@ class OnPolicyRunner:
                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
             ep_infos.clear()
             if it == start_iter:
-                store_code_state(self.log_dir, self.git_status_repos)
+                store_code_state(self.log_dir, self.git_status_repos, self.train_cfg, self.env.cfg)
         
         self.current_learning_iteration += num_learning_iterations
         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
