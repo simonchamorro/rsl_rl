@@ -36,9 +36,11 @@ import statistics
 from torch.utils.tensorboard import SummaryWriter
 import torch
 
+import rsl_rl
 from rsl_rl.algorithms import PPO
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
 from rsl_rl.env import VecEnv
+from rsl_rl.utils import store_code_state
 
 
 class OnPolicyRunner:
@@ -77,6 +79,7 @@ class OnPolicyRunner:
         self.tot_timesteps = 0
         self.tot_time = 0
         self.current_learning_iteration = 0
+        self.git_status_repos = [rsl_rl.__file__]
 
         _, _ = self.env.reset()
     
@@ -98,6 +101,7 @@ class OnPolicyRunner:
         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
+        start_iter = self.current_learning_iteration
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
             start = time.time()
@@ -137,6 +141,8 @@ class OnPolicyRunner:
             if it % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
             ep_infos.clear()
+            if it == start_iter:
+                store_code_state(self.log_dir, self.git_status_repos)
         
         self.current_learning_iteration += num_learning_iterations
         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
@@ -231,3 +237,6 @@ class OnPolicyRunner:
         if device is not None:
             self.alg.actor_critic.to(device)
         return self.alg.actor_critic.act_inference
+
+    def add_git_repo_to_log(self, repo_file_path):
+        self.git_status_repos.append(repo_file_path)

@@ -1,0 +1,111 @@
+--- git status ---
+On branch master
+Your branch is up to date with 'origin/master'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   rsl_rl/runners/on_policy_runner.py
+	modified:   rsl_rl/utils/__init__.py
+	modified:   rsl_rl/utils/utils.py
+
+no changes added to commit (use "git add" and/or "git commit -a") 
+
+
+--- git diff ---
+diff --git a/rsl_rl/runners/on_policy_runner.py b/rsl_rl/runners/on_policy_runner.py
+index e11ae4d..36bd6e9 100644
+--- a/rsl_rl/runners/on_policy_runner.py
++++ b/rsl_rl/runners/on_policy_runner.py
+@@ -36,10 +36,12 @@ import statistics
+ from torch.utils.tensorboard import SummaryWriter
+ import torch
+ 
++# rsl-rl
++import rsl_rl
+ from rsl_rl.algorithms import PPO
+ from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
+ from rsl_rl.env import VecEnv
+-
++from rsl_rl.utils import store_code_state
+ 
+ class OnPolicyRunner:
+ 
+@@ -77,6 +79,7 @@ class OnPolicyRunner:
+         self.tot_timesteps = 0
+         self.tot_time = 0
+         self.current_learning_iteration = 0
++        self.git_status_repos = [rsl_rl.__file__]
+ 
+         _, _ = self.env.reset()
+     
+@@ -98,6 +101,7 @@ class OnPolicyRunner:
+         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+ 
++        start_iter = self.current_learning_iteration
+         tot_iter = self.current_learning_iteration + num_learning_iterations
+         for it in range(self.current_learning_iteration, tot_iter):
+             start = time.time()
+@@ -137,6 +141,9 @@ class OnPolicyRunner:
+             if it % self.save_interval == 0:
+                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+             ep_infos.clear()
++            if it == start_iter:
++                store_code_state(self.log_dir, self.git_status_repos)
+         
+         self.current_learning_iteration += num_learning_iterations
+         self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+@@ -231,3 +238,7 @@ class OnPolicyRunner:
+         if device is not None:
+             self.alg.actor_critic.to(device)
+         return self.alg.actor_critic.act_inference
++
++
++    def add_git_repo_to_log(self, repo_file_path):
++        self.git_status_repos.append(repo_file_path)
+\ No newline at end of file
+diff --git a/rsl_rl/utils/__init__.py b/rsl_rl/utils/__init__.py
+index 1b505f3..627fbea 100644
+--- a/rsl_rl/utils/__init__.py
++++ b/rsl_rl/utils/__init__.py
+@@ -28,4 +28,4 @@
+ #
+ # Copyright (c) 2021 ETH Zurich, Nikita Rudin
+ 
+-from .utils import split_and_pad_trajectories, unpad_trajectories
+\ No newline at end of file
++from .utils import split_and_pad_trajectories, unpad_trajectories, store_code_state
+\ No newline at end of file
+diff --git a/rsl_rl/utils/utils.py b/rsl_rl/utils/utils.py
+index b6affab..462071b 100644
+--- a/rsl_rl/utils/utils.py
++++ b/rsl_rl/utils/utils.py
+@@ -28,6 +28,11 @@
+ #
+ # Copyright (c) 2021 ETH Zurich, Nikita Rudin
+ 
++# python
++import os
++import git
++import pathlib
++
+ import torch
+ 
+ def split_and_pad_trajectories(tensor, dones):
+@@ -68,4 +73,13 @@ def unpad_trajectories(trajectories, masks):
+     """ Does the inverse operation of  split_and_pad_trajectories()
+     """
+     # Need to transpose before and after the masking to have proper reshaping
+-    return trajectories.transpose(1, 0)[masks.transpose(1, 0)].view(-1, trajectories.shape[0], trajectories.shape[-1]).transpose(1, 0)
+\ No newline at end of file
++    return trajectories.transpose(1, 0)[masks.transpose(1, 0)].view(-1, trajectories.shape[0], trajectories.shape[-1]).transpose(1, 0)
++
++def store_code_state(logdir, repositories):
++    for repository_file_path in repositories:
++        repo = git.Repo(repository_file_path, search_parent_directories=True)
++        repo_name = pathlib.Path(repo.working_dir).name
++        t = repo.head.commit.tree
++        content = f"--- git status ---\n{repo.git.status()} \n\n\n--- git diff ---\n{repo.git.diff(t)}"
++        with open(os.path.join(logdir, f"{repo_name}_git.diff"), "x") as f:
++            f.write(content)
