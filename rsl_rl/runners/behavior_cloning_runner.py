@@ -83,10 +83,6 @@ class BehaviorCloningRunner:
 
         _, _ = self.env.reset()
     
-        # TODO
-        ###############################
-        ###############################
-        ###############################
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
         if self.log_dir is not None and self.writer is None:
@@ -225,6 +221,10 @@ class BehaviorCloningRunner:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         self.current_learning_iteration = loaded_dict['iter']
         return loaded_dict['infos']
+
+    def load_teacher(self, path):
+        loaded_dict = torch.load(path)
+        self.alg.teacher.load_state_dict(loaded_dict['model_state_dict'])
 
     def get_inference_policy(self, device=None):
         self.alg.student.eval() # switch to evaluation mode (dropout for example)

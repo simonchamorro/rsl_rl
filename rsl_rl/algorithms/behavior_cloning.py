@@ -46,7 +46,9 @@ class BehaviorCloning:
                  learning_rate=1e-3,
                  schedule="fixed",
                  device='cpu',
-                 ):
+                 **kwargs):
+        if kwargs:
+            print("BehaviorCloning.__init__ got unexpected arguments, which will be ignored: " + str(kwargs.keys()),)
 
         self.device = device
 
@@ -65,13 +67,13 @@ class BehaviorCloning:
         # Learning parameters
         self.num_learning_epochs = num_learning_epochs
         self.num_mini_batches = num_mini_batches
-        self.teacher.test()
+        self.teacher.eval()
 
     def init_storage(self, num_envs, num_transitions_per_env, student_obs_shape, teacher_obs_shape, action_shape):
         self.storage = BCRolloutStorage(num_envs, num_transitions_per_env, student_obs_shape, teacher_obs_shape, action_shape, self.device)
 
     def test_mode(self):
-        self.student.test()
+        self.student.eval()
     
     def train_mode(self):
         self.student.train()
