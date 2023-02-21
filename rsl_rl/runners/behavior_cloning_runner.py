@@ -37,7 +37,7 @@ from torch.utils.tensorboard import SummaryWriter
 import torch
 
 import rsl_rl
-from rsl_rl.algorithms import BehaviorCloning
+from rsl_rl.algorithms import BehaviorCloning, DaggerBehaviorCloning
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, MLPPolicy
 from rsl_rl.env import VecEnv
 from rsl_rl.utils import store_code_state
@@ -71,7 +71,8 @@ class BehaviorCloningRunner:
         self.save_interval = self.cfg["save_interval"]
 
         # init storage and model
-        self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions])
+        self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], 
+                              [self.env.num_actions], self.cfg["num_epochs_stored"])
 
         # Log
         self.log_dir = log_dir

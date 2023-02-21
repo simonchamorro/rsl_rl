@@ -69,8 +69,9 @@ class BehaviorCloning:
         self.num_mini_batches = num_mini_batches
         self.teacher.eval()
 
-    def init_storage(self, num_envs, num_transitions_per_env, student_obs_shape, teacher_obs_shape, action_shape):
-        self.storage = BCRolloutStorage(num_envs, num_transitions_per_env, student_obs_shape, teacher_obs_shape, action_shape, self.device)
+    def init_storage(self, num_envs, num_transitions_per_env, student_obs_shape, teacher_obs_shape, action_shape, num_epochs_stored):
+        self.storage = BCRolloutStorage(num_envs, num_transitions_per_env, student_obs_shape, teacher_obs_shape, 
+                                        action_shape, self.device, num_epochs_stored)
 
     def test_mode(self):
         self.student.eval()
@@ -79,10 +80,10 @@ class BehaviorCloning:
         self.student.train()
 
     def act(self, student_obs, teacher_obs):
-        # Compute the actions and values
+        # Compute the actions
         self.transition.student_actions = self.student.act(student_obs).detach()
         self.transition.teacher_actions = self.teacher.act(teacher_obs).detach()
-        # need to record obs and critic_obs before env.step()
+        # need to record student_obs and teacher_obs before env.step()
         self.transition.student_observations = student_obs
         self.transition.teacher_observations = teacher_obs
         return self.transition.teacher_actions
@@ -99,13 +100,12 @@ class BehaviorCloning:
     def update(self):
         mse_loss = 0
         generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for student_obs_batch, teacher_obs_batch, actions_batch, _, _ in generator:
+        for student_obs_batch, teacher_obs_batch, student_actions_batch, teacher_actions_batch, _, _ in generator:
             
             actions_student = self.student.act_inference(student_obs_batch)
-            actions_teacher = actions_batch
 
             # Loss
-            loss = nn.MSELoss()(actions_student, actions_teacher)
+            loss = nn.MSELoss()(actions_student, teacher_actions_batch)
             
             # Gradient step
             self.optimizer.zero_grad()
@@ -119,3 +119,14 @@ class BehaviorCloning:
         self.storage.clear()
 
         return mse_loss
+
+
+class DaggerBehaviorCloning(BehaviorCloning):
+    def act(self, student_obs, teacher_obs):
+        # Compute the actions
+        self.transition.student_actions = self.student.act(student_obs).detach()
+        self.transition.teacher_actions = self.teacher.act(teacher_obs).detach()
+        # need to record student_obs and teacher_obs before env.step()
+        self.transition.student_observations = student_obs
+        self.transition.teacher_observations = teacher_obs
+        return self.transition.student_actions

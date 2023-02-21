@@ -29,4 +29,4 @@
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
 from .ppo import PPO
-from .behavior_cloning import BehaviorCloning
+from .behavior_cloning import BehaviorCloning, DaggerBehaviorCloning
