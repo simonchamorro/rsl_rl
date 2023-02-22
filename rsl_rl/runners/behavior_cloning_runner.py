@@ -107,12 +107,20 @@ class BehaviorCloningRunner:
             start = time.time()
             # Rollout
             with torch.inference_mode():
+                # Collect data for training
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(student_obs, teacher_obs)
                     student_obs, teacher_obs, rewards, dones, infos = self.env.step(actions)
                     student_obs, teacher_obs, rewards, dones = student_obs.to(self.device), teacher_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                     self.alg.process_env_step(rewards, dones, infos)
                     
+                # Eval student policy
+                self.alg.student.eval()
+                for i in range(self.num_steps_per_env):
+                    actions = self.alg.student.act_inference(student_obs)
+                    student_obs, teacher_obs, rewards, dones, infos = self.env.step(actions)
+                    student_obs, teacher_obs, rewards, dones = student_obs.to(self.device), teacher_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+
                     if self.log_dir is not None:
                         # Book keeping
                         if 'episode' in infos:
