@@ -102,7 +102,7 @@ class BehaviorCloning:
         generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for student_obs_batch, teacher_obs_batch, student_actions_batch, teacher_actions_batch, _, _ in generator:
             
-            actions_student = self.student.act_inference(student_obs_batch)
+            actions_student = self.student.actor(student_obs_batch)
 
             # Loss
             loss = nn.MSELoss()(actions_student, teacher_actions_batch)
@@ -125,7 +125,7 @@ class DaggerBehaviorCloning(BehaviorCloning):
     def act(self, student_obs, teacher_obs):
         # Compute the actions
         self.transition.student_actions = self.student.act(student_obs).detach()
-        self.transition.teacher_actions = self.teacher.act(teacher_obs).detach()
+        self.transition.teacher_actions = self.teacher.act_inference(teacher_obs).detach()
         # need to record student_obs and teacher_obs before env.step()
         self.transition.student_observations = student_obs
         self.transition.teacher_observations = teacher_obs
