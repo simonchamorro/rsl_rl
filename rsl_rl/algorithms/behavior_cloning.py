@@ -98,6 +98,7 @@ class BehaviorCloning:
         self.student.reset(dones)
 
     def update(self):
+        self.student.train()
         mse_loss = 0
         generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for student_obs_batch, teacher_obs_batch, student_actions_batch, teacher_actions_batch, _, _ in generator:
