@@ -28,5 +28,6 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-from .actor_critic import ActorCritic
+from .actor_critic import ActorCritic, get_activation
 from .actor_critic_recurrent import ActorCriticRecurrent
+from .mlp_policy import MLPPolicy

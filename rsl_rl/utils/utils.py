@@ -81,7 +81,7 @@ def store_code_state(logdir, repositories, train_params, env_params):
         repo = git.Repo(repository_file_path, search_parent_directories=True)
         repo_name = pathlib.Path(repo.working_dir).name
         t = repo.head.commit.tree
-        content = f"--- git status ---\n{repo.git.status()} \n\n\n--- git diff ---\n{repo.git.diff(t)}"
+        content = f"--- git status ---\n{repo.git.status()} \n\n\n--- git diff ---\n{repo.git.diff(t)}\n"
         with open(os.path.join(logdir, f"{repo_name}_git.diff"), "x") as f:
             f.write(content)
     # Log params
