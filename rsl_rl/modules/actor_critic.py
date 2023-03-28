@@ -40,8 +40,12 @@ class ActorCritic(nn.Module):
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
                         num_actions,
+                        use_adaptation_module,
+                        num_params_encoder,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
+                        encoder_hidden_dims=[128, 128],
+                        num_params_latent=8,
                         activation='elu',
                         init_noise_std=1.0,
                         **kwargs):
@@ -50,9 +54,14 @@ class ActorCritic(nn.Module):
         super(ActorCritic, self).__init__()
 
         activation = get_activation(activation)
+        self.use_adaptation_module = use_adaptation_module
 
-        mlp_input_dim_a = num_actor_obs
-        mlp_input_dim_c = num_critic_obs
+        if use_adaptation_module:
+            mlp_input_dim_a = num_actor_obs + num_params_latent
+            mlp_input_dim_c = num_critic_obs + num_params_latent
+        else:
+            mlp_input_dim_a = num_actor_obs
+            mlp_input_dim_c = num_critic_obs
 
         # Policy
         actor_layers = []
@@ -80,6 +89,20 @@ class ActorCritic(nn.Module):
 
         print(f"Actor MLP: {self.actor}")
         print(f"Critic MLP: {self.critic}")
+
+        if use_adaptation_module:
+            # Extrinsic params encoder
+            encoder_layers = []
+            encoder_layers.append(nn.Linear(num_params_encoder, encoder_hidden_dims[0]))
+            encoder_layers.append(activation)
+            for l in range(len(encoder_hidden_dims)):
+                if l == len(encoder_hidden_dims) - 1:
+                    encoder_layers.append(nn.Linear(encoder_hidden_dims[l], num_params_latent))
+                else:
+                    encoder_layers.append(nn.Linear(encoder_hidden_dims[l], encoder_hidden_dims[l + 1]))
+                    encoder_layers.append(activation)
+            self.encoder = nn.Sequential(*encoder_layers)
+            print(f"Encoder MLP: {self.encoder}")
 
         # Action noise
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
@@ -120,20 +143,38 @@ class ActorCritic(nn.Module):
         mean = self.actor(observations)
         self.distribution = Normal(mean, mean*0. + self.std)
 
-    def act(self, observations, **kwargs):
-        self.update_distribution(observations)
+    def act(self, observations, env_params=None, **kwargs):
+        if self.use_adaptation_module:
+            env_params_latent = self.encode_params(env_params)
+            actor_input = torch.cat([observations, env_params_latent], dim=-1)
+        else:
+            actor_input = observations
+        self.update_distribution(actor_input)
         return self.distribution.sample()
     
     def get_actions_log_prob(self, actions):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
-    def act_inference(self, observations):
-        actions_mean = self.actor(observations)
+    def act_inference(self, observations, env_params=None):
+        if self.use_adaptation_module:
+            env_params_latent = self.encode_params(env_params)
+            actor_input = torch.cat([observations, env_params_latent], dim=-1)
+        else:
+            actor_input = observations
+        actions_mean = self.actor(actor_input)
         return actions_mean
 
-    def evaluate(self, critic_observations, **kwargs):
-        value = self.critic(critic_observations)
+    def evaluate(self, critic_observations, env_params=None, **kwargs):
+        if self.use_adaptation_module:
+            env_params_latent = self.encode_params(env_params)
+            critic_input = torch.cat([critic_observations, env_params_latent], dim=-1)
+        else:
+            critic_input = critic_observations
+        value = self.critic(critic_input)
         return value
+
+    def encode_params(self, env_params):
+        return self.encoder(env_params)
 
 def get_activation(act_name):
     if act_name == "elu":
