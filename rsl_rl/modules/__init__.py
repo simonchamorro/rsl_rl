@@ -31,3 +31,4 @@
 from .actor_critic import ActorCritic, get_activation
 from .actor_critic_recurrent import ActorCriticRecurrent
 from .mlp_policy import MLPPolicy
+from .adaptation_module import AdaptationModule

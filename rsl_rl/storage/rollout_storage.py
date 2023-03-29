@@ -47,11 +47,12 @@ class RolloutStorage:
             self.action_sigma = None
             self.hidden_states = None
             self.env_params = None
+            self.state_action_history = None
         
         def clear(self):
             self.__init__()
 
-    def __init__(self, num_envs, num_transitions_per_env, obs_shape, privileged_obs_shape, actions_shape, env_params_shape, device='cpu'):
+    def __init__(self, num_envs, num_transitions_per_env, obs_shape, privileged_obs_shape, actions_shape, env_params_shape, n_history=[32], device='cpu'):
 
         self.device = device
 
@@ -59,6 +60,7 @@ class RolloutStorage:
         self.privileged_obs_shape = privileged_obs_shape
         self.actions_shape = actions_shape
         self.env_params_shape = env_params_shape
+        self.n_history = n_history
 
         # Core
         self.observations = torch.zeros(num_transitions_per_env, num_envs, *obs_shape, device=self.device)
@@ -67,6 +69,7 @@ class RolloutStorage:
         else:
             self.privileged_observations = None
         self.env_params = torch.zeros(num_transitions_per_env, num_envs, *env_params_shape, device=self.device)
+        self.state_action_history = torch.zeros(num_transitions_per_env, num_envs, *n_history, obs_shape[0] + actions_shape[0], device=self.device)
         self.rewards = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
         self.actions = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
         self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()
@@ -91,6 +94,7 @@ class RolloutStorage:
     def add_transitions(self, transition: Transition):
         if self.step >= self.num_transitions_per_env:
             raise AssertionError("Rollout buffer overflow")
+        self.state_action_history[self.step].copy_(transition.state_action_history)
         self.observations[self.step].copy_(transition.observations)
         if self.privileged_observations is not None: self.privileged_observations[self.step].copy_(transition.critic_observations)
         self.env_params[self.step].copy_(transition.env_params)
@@ -159,6 +163,7 @@ class RolloutStorage:
         else:
             critic_observations = observations
         env_params = self.env_params.flatten(0, 1)
+        state_action_history = self.state_action_history.flatten(0, 1)
 
         actions = self.actions.flatten(0, 1)
         values = self.values.flatten(0, 1)
@@ -178,6 +183,7 @@ class RolloutStorage:
                 obs_batch = observations[batch_idx]
                 critic_observations_batch = critic_observations[batch_idx]
                 env_params_batch = env_params[batch_idx]
+                state_action_history_batch = state_action_history[batch_idx]
                 actions_batch = actions[batch_idx]
                 target_values_batch = values[batch_idx]
                 returns_batch = returns[batch_idx]
@@ -185,7 +191,8 @@ class RolloutStorage:
                 advantages_batch = advantages[batch_idx]
                 old_mu_batch = old_mu[batch_idx]
                 old_sigma_batch = old_sigma[batch_idx]
-                yield obs_batch, critic_observations_batch, env_params_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, \
+                yield obs_batch, critic_observations_batch, env_params_batch, state_action_history_batch, actions_batch, \
+                       target_values_batch, advantages_batch, returns_batch, \
                        old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (None, None), None
 
     # for RNNs only

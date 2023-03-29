@@ -39,6 +39,7 @@ class PPO:
     actor_critic: ActorCritic
     def __init__(self,
                  actor_critic,
+                 adaptation_module,
                  num_learning_epochs=1,
                  num_mini_batches=1,
                  clip_param=0.2,
@@ -63,6 +64,8 @@ class PPO:
         # PPO components
         self.actor_critic = actor_critic
         self.actor_critic.to(self.device)
+        self.adaptation_module = adaptation_module
+        self.adaptation_module.to(self.device)
         self.storage = None # initialized later
         self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
         self.transition = RolloutStorage.Transition()
@@ -78,8 +81,9 @@ class PPO:
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
 
-    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, env_params_shape):
-        self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, env_params_shape, self.device)
+    def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, env_params_shape, n_history):
+        self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, env_params_shape, n_history, self.device)
+        self.rolling_state_action_history = torch.zeros(num_envs, *n_history, actor_obs_shape[0] + action_shape[0], device=self.device)
 
     def test_mode(self):
         self.actor_critic.test()
@@ -100,11 +104,17 @@ class PPO:
         self.transition.observations = obs
         self.transition.critic_observations = critic_obs
         self.transition.env_params = env_params
+        # Fill state action history
+        current_state_action = torch.cat([obs, self.transition.actions], dim=-1).detach()
+        self.rolling_state_action_history[:, 0, :].copy_(current_state_action)
+        self.rolling_state_action_history = torch.roll(self.rolling_state_action_history, shifts=-1, dims=1)
+        self.transition.state_action_history = self.rolling_state_action_history.clone()
         return self.transition.actions
     
     def process_env_step(self, rewards, dones, infos):
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
+        self.rolling_state_action_history[dones, :, :] = 0 # reset state action history if episode done
         # # Bootstrapping on time outs
         # if 'time_outs' in infos:
         #     self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
@@ -122,11 +132,11 @@ class PPO:
         mean_value_loss = 0
         mean_surrogate_loss = 0
         if self.actor_critic.is_recurrent:
-            generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+            raise NotImplementedError
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        for obs_batch, critic_obs_batch, env_params_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, \
-            old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
+        for obs_batch, critic_obs_batch, env_params_batch, state_action_history_batch, actions_batch, target_values_batch, advantages_batch, \
+            returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
 
 
                 self.actor_critic.act(obs_batch, env_params=env_params_batch , masks=masks_batch, hidden_states=hid_states_batch[0])

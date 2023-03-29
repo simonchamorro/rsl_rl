@@ -38,7 +38,7 @@ import torch
 
 import rsl_rl
 from rsl_rl.algorithms import PPO
-from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
+from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, AdaptationModule
 from rsl_rl.env import VecEnv
 from rsl_rl.utils import store_code_state
 
@@ -67,14 +67,18 @@ class OnPolicyRunner:
                                                         self.env.num_actions,
                                                         self.cfg["use_adaptation_module"],
                                                         self.env.num_env_params,
+                                                        num_params_latent_dim=8,
                                                         **self.policy_cfg).to(self.device)
+        self.adaptation_module = AdaptationModule(self.env.num_obs, self.env.num_actions, latent_dim=8)
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        self.alg: PPO = alg_class(actor_critic, device=self.device, **self.alg_cfg)
+        self.alg: PPO = alg_class(actor_critic, self.adaptation_module, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
+        # TODO: parametrize
+        self.n_history = 32
 
         # init storage and model
-        self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions], [self.env.num_env_params])
+        self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions], [self.env.num_env_params], [self.n_history])
 
         # Log
         self.log_dir = log_dir
