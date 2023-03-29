@@ -91,8 +91,8 @@ class PPO:
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
         # Compute the actions and values
-        self.transition.actions = self.actor_critic.act(obs).detach()
-        self.transition.values = self.actor_critic.evaluate(critic_obs).detach()
+        self.transition.actions = self.actor_critic.act(obs, env_params).detach()
+        self.transition.values = self.actor_critic.evaluate(critic_obs, env_params).detach()
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
@@ -114,8 +114,8 @@ class PPO:
         self.transition.clear()
         self.actor_critic.reset(dones)
     
-    def compute_returns(self, last_critic_obs):
-        last_values= self.actor_critic.evaluate(last_critic_obs).detach()
+    def compute_returns(self, last_critic_obs, env_params=None):
+        last_values= self.actor_critic.evaluate(last_critic_obs, env_params).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
     def update(self):
@@ -131,7 +131,7 @@ class PPO:
 
                 self.actor_critic.act(obs_batch, env_params=env_params_batch , masks=masks_batch, hidden_states=hid_states_batch[0])
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
-                value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
+                value_batch = self.actor_critic.evaluate(critic_obs_batch, env_params_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
                 mu_batch = self.actor_critic.action_mean
                 sigma_batch = self.actor_critic.action_std
                 entropy_batch = self.actor_critic.entropy
