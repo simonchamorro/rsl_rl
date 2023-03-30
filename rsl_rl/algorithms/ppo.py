@@ -31,6 +31,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 
 from rsl_rl.modules import ActorCritic
 from rsl_rl.storage import RolloutStorage
@@ -70,10 +71,10 @@ class PPO:
         self.env_params_encoder = env_params_encoder
         self.env_params_encoder.to(self.device)
         self.storage = None # initialized later
-        # TODO: Multiple optimizers?
-        self.optimizer = optim.Adam([{'params': self.actor_critic.parameters()}, 
-                                     {'params': self.env_params_encoder.parameters()}],
-                                     lr=learning_rate)
+        self.actor_critic_optimizer = optim.Adam([{'params': self.actor_critic.parameters()}, 
+                                                  {'params': self.env_params_encoder.parameters()}],
+                                                   lr=learning_rate)
+        self.adaptation_module_optimizer = optim.Adam(self.adaptation_module.parameters(), lr=learning_rate)
         self.transition = RolloutStorage.Transition()
 
         # PPO parameters
@@ -101,9 +102,12 @@ class PPO:
         self.adaptation_module.train()
         self.env_params_encoder.train()
 
-    def act(self, obs, critic_obs, env_params):
+    def act(self, obs, critic_obs, env_params, adaptation_module_bool=False):
         # Encode env params
-        encoded_params = self.env_params_encoder(env_params)
+        if adaptation_module_bool:
+            encoded_params = self.adaptation_module(self.rolling_state_action_history)
+        else:
+            encoded_params = self.env_params_encoder(env_params)
         # Compute the actions and values
         self.transition.actions = self.actor_critic.act(torch.cat((obs, encoded_params), dim=-1)).detach()
         self.transition.values = self.actor_critic.evaluate(torch.cat((critic_obs, encoded_params), dim=-1)).detach()
@@ -134,18 +138,57 @@ class PPO:
         self.transition.clear()
         self.actor_critic.reset(dones)
     
-    def compute_returns(self, last_critic_obs, env_params):
-        encoded_params = self.env_params_encoder(env_params)
+    def compute_returns(self, last_critic_obs, env_params, adaptation_module_bool=False):
+        # Encode env params
+        if adaptation_module_bool:
+            encoded_params = self.adaptation_module(self.rolling_state_action_history)
+        else:
+            encoded_params = self.env_params_encoder(env_params)
         last_values= self.actor_critic.evaluate(torch.cat((last_critic_obs, encoded_params), dim=-1)).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
-    def update(self):
+    def update(self, adaptation_module_bool=False):
+        if adaptation_module_bool:
+            self.actor_critic.eval()
+            self.env_params_encoder.eval()
+            self.adaptation_module.train()
+            mean_value_loss, mean_surrogate_loss, mean_mse_loss = self.update_adaptation_module()
+        else:
+            self.actor_critic.train()
+            self.env_params_encoder.train()
+            self.adaptation_module.eval()
+            mean_value_loss, mean_surrogate_loss, mean_mse_loss = self.update_actor_critic()
+        return mean_value_loss, mean_surrogate_loss, mean_mse_loss
+    
+    def update_adaptation_module(self):
+        mean_mse_loss = 0
+        generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        for _, _, env_params_batch, state_action_history_batch, _, _, _, _, _, _, _, _, _ in generator:
+
+            encoded_params_adaptation_module = self.adaptation_module(state_action_history_batch)
+            encoded_params_encoder = self.env_params_encoder(env_params_batch).detach()
+
+            mse_loss = F.mse_loss(encoded_params_adaptation_module, encoded_params_encoder)
+
+            # Gradient step
+            self.adaptation_module_optimizer.zero_grad()
+            mse_loss.backward()
+            # Use this?
+            # nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
+            self.adaptation_module_optimizer.step()
+
+            mean_mse_loss += mse_loss.item()
+
+        num_updates = self.num_learning_epochs * self.num_mini_batches
+        mean_mse_loss /= num_updates
+        self.storage.clear()
+
+        return None, None, mean_mse_loss
+
+    def update_actor_critic(self):
         mean_value_loss = 0
         mean_surrogate_loss = 0
-        if self.actor_critic.is_recurrent:
-            raise NotImplementedError
-        else:
-            generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, env_params_batch, state_action_history_batch, actions_batch, target_values_batch, advantages_batch, \
             returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
 
@@ -170,7 +213,7 @@ class PPO:
                         elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
                             self.learning_rate = min(1e-2, self.learning_rate * 1.5)
                         
-                        for param_group in self.optimizer.param_groups:
+                        for param_group in self.actor_critic_optimizer.param_groups:
                             param_group['lr'] = self.learning_rate
 
 
@@ -194,10 +237,10 @@ class PPO:
                 loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
 
                 # Gradient step
-                self.optimizer.zero_grad()
+                self.actor_critic_optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
-                self.optimizer.step()
+                self.actor_critic_optimizer.step()
 
                 mean_value_loss += value_loss.item()
                 mean_surrogate_loss += surrogate_loss.item()
@@ -207,4 +250,4 @@ class PPO:
         mean_surrogate_loss /= num_updates
         self.storage.clear()
 
-        return mean_value_loss, mean_surrogate_loss
+        return mean_value_loss, mean_surrogate_loss, None

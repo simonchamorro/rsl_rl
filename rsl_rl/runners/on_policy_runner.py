@@ -80,6 +80,7 @@ class OnPolicyRunner:
         self.save_interval = self.cfg["save_interval"]
         # TODO: parametrize
         self.n_history = 32
+        self.train_adaptation_every = 20
 
         # init storage and model
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs], [self.env.num_privileged_obs], [self.env.num_actions], [self.env.num_env_params], [self.n_history])
@@ -106,6 +107,8 @@ class OnPolicyRunner:
         critic_obs = privileged_obs if privileged_obs is not None else obs
         obs, critic_obs, env_params = obs.to(self.device), critic_obs.to(self.device), env_params.to(self.device)
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
+        self.adaptation_module.train()
+        self.env_params_encoder.train()
 
         ep_infos = []
         rewbuffer = deque(maxlen=100)
@@ -115,12 +118,19 @@ class OnPolicyRunner:
 
         start_iter = self.current_learning_iteration
         tot_iter = self.current_learning_iteration + num_learning_iterations
+        train_adaptation = False
         for it in range(self.current_learning_iteration, tot_iter):
+            # Train adaptation module
+            if (it + 1) % self.train_adaptation_every == 0:
+                train_adaptation = True
+            else:
+                train_adaptation = False
+
             start = time.time()
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                    actions = self.alg.act(obs, critic_obs, env_params)
+                    actions = self.alg.act(obs, critic_obs, env_params, adaptation_module_bool=train_adaptation)
                     obs, privileged_obs, rewards, dones, infos, env_params = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     obs, critic_obs, rewards, dones, env_params = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device), env_params.to(self.device)
@@ -143,9 +153,9 @@ class OnPolicyRunner:
 
                 # Learning step
                 start = stop
-                self.alg.compute_returns(critic_obs, env_params)
+                self.alg.compute_returns(critic_obs, env_params, adaptation_module_bool=train_adaptation)
             
-            mean_value_loss, mean_surrogate_loss = self.alg.update()
+            mean_value_loss, mean_surrogate_loss, adaptation_mse_loss = self.alg.update(adaptation_module_bool=train_adaptation)
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None:
@@ -181,62 +191,92 @@ class OnPolicyRunner:
         mean_std = self.alg.actor_critic.std.mean()
         fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
 
-        self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
-        self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
-        self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
-        self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
         self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
         self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
         self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
+
         if len(locs['rewbuffer']) > 0:
             self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
 
-        str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
+        if locs['train_adaptation']:
+            self.writer.add_scalar('Loss/adaptation_module_mse', locs['adaptation_mse_loss'], locs['it'])
+            # self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
 
-        if len(locs['rewbuffer']) > 0:
-            log_string = (f"""{'#' * width}\n"""
-                          f"""{str.center(width, ' ')}\n\n"""
-                          f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
-                          f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
-                          f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
-                          f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
-                          f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
-                        #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-                        #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
+            str = f" \033[1m Adaptation - Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
+            if len(locs['rewbuffer']) > 0:
+                log_string = (f"""{'#' * width}\n"""
+                            f"""{str.center(width, ' ')}\n\n"""
+                            f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
+                                'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                            f"""{'Adaptation MSE Loss:':>{pad}} {locs['adaptation_mse_loss']:.4f}\n"""
+                            f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                            f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
+
+            else:
+                log_string = (f"""{'#' * width}\n"""
+                            f"""{str.center(width, ' ')}\n\n"""
+                            f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
+                                'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n""")
+
+            log_string += ep_string
+            log_string += (f"""{'-' * width}\n"""
+                        f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
+                        f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
+                        f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
+                        f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
+                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
+
         else:
-            log_string = (f"""{'#' * width}\n"""
-                          f"""{str.center(width, ' ')}\n\n"""
-                          f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
-                          f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
-                          f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
-                        #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
-                        #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
+            self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
+            self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
+            self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
+            self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
 
-        log_string += ep_string
-        log_string += (f"""{'-' * width}\n"""
-                       f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
-                       f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
-                       f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
-                       f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
-                               locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
+            str = f" \033[1m Policy - Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
+            if len(locs['rewbuffer']) > 0:
+                log_string = (f"""{'#' * width}\n"""
+                            f"""{str.center(width, ' ')}\n\n"""
+                            f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
+                                'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                            f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
+                            f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                            f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
+                            f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                            f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
+            else:
+                log_string = (f"""{'#' * width}\n"""
+                            f"""{str.center(width, ' ')}\n\n"""
+                            f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
+                                'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+                            f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
+                            f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                            f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
+
+            log_string += ep_string
+            log_string += (f"""{'-' * width}\n"""
+                        f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
+                        f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
+                        f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
+                        f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
+                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
         print(log_string)
 
     def save(self, path, infos=None):
         torch.save({
-            'model_state_dict': self.alg.actor_critic.state_dict(),
-            'optimizer_state_dict': self.alg.optimizer.state_dict(),
+            'actor_critic_state_dict': self.alg.actor_critic.state_dict(),
+            'encoder_state_dict': self.alg.env_params_encoder.state_dict(),
+            'actor_critic_optimizer_state_dict': self.alg.actor_critic_optimizer.state_dict(),
+            'adaptation_module_state_dict': self.alg.adaptation_module.state_dict(),
+            'adaptation_module_optimizer_state_dict': self.alg.adaptation_module_optimizer.state_dict(),
             'iter': self.current_learning_iteration,
             'infos': infos,
             }, path)
 
     def load(self, path, load_optimizer=True):
+        # TODO
         loaded_dict = torch.load(path)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         if load_optimizer:

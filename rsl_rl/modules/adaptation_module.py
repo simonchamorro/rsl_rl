@@ -59,15 +59,14 @@ class AdaptationModule(nn.Module):
         [torch.nn.init.orthogonal_(module.weight, gain=scales[idx]) for idx, module in
          enumerate(mod for mod in sequential if isinstance(mod, nn.Linear))]
 
-    def forward(self, states, actions):
-        # states: (batch_size, num_obs)
-        # actions: (batch_size, num_actions)
-        mlp_input = torch.cat([states, actions], dim=-1)
-        mlp_output = self.mlp(mlp_input)
-        breakpoint()
-        # CHECK SHAPES
+    def forward(self, state_action_history):
+        # state_action_history (num_envs, num_temporal_steps, num_obs + num_actions)
+        mlp_output = self.mlp(state_action_history)
+        # mlp_output (num_envs, num_temporal_steps, mlp_output_dim)
         cnn_output = self.temporal_cnn(mlp_output)
-        latent = self.linear(cnn_output)
+        # cnn_output (num_envs, 32, 1)
+        latent = self.linear(cnn_output.squeeze(-1))
+        # latent (num_envs, latent_dim)
         return latent
     
     # @property
