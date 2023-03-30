@@ -93,14 +93,23 @@ class PPO:
         self.rolling_state_action_history = torch.zeros(num_envs, *n_history, actor_obs_shape[0] + action_shape[0], device=self.device)
 
     def test_mode(self):
-        self.actor_critic.test()
-        self.adaptation_module.test()
-        self.env_params_encoder.test()
+        self.actor_critic.eval()
+        self.adaptation_module.eval()
+        self.env_params_encoder.eval()
     
     def train_mode(self):
         self.actor_critic.train()
         self.adaptation_module.train()
         self.env_params_encoder.train()
+    
+    def act_inference(self, observations, env_params, state_action_history, adaptation_module_bool=True):
+        if adaptation_module_bool:
+            encoded_params = self.adaptation_module(state_action_history)
+        else:
+            encoded_params = self.env_params_encoder(env_params)
+        actor_input = torch.cat([observations, encoded_params], dim=-1)
+        actions = self.actor_critic.act_inference(actor_input)
+        return actions
 
     def act(self, obs, critic_obs, env_params, adaptation_module_bool=False):
         # Encode env params

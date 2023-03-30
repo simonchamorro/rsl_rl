@@ -276,19 +276,23 @@ class OnPolicyRunner:
             }, path)
 
     def load(self, path, load_optimizer=True):
-        # TODO
         loaded_dict = torch.load(path)
-        self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
+        self.alg.actor_critic.load_state_dict(loaded_dict['actor_critic_state_dict'])
+        self.alg.env_params_encoder.load_state_dict(loaded_dict['encoder_state_dict'])
+        self.alg.adaptation_module.load_state_dict(loaded_dict['adaptation_module_state_dict'])
         if load_optimizer:
-            self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
+            self.alg.actor_critic_optimizer.load_state_dict(loaded_dict['actor_critic_optimizer_state_dict'])
+            self.alg.adaptation_module_optimizer.load_state_dict(loaded_dict['adaptation_module_optimizer_state_dict'])
         self.current_learning_iteration = loaded_dict['iter']
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None):
-        self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)
+        self.alg.test_mode() # switch to evaluation mode (dropout for example)
         if device is not None:
             self.alg.actor_critic.to(device)
-        return self.alg.actor_critic.act_inference
+            self.alg.adaptation_module.to(device)
+            self.alg.env_params_encoder.to(device)
+        return self.alg.act_inference
 
     def add_git_repo_to_log(self, repo_file_path):
         self.git_status_repos.append(repo_file_path)
