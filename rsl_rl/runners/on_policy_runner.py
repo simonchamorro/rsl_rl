@@ -38,7 +38,7 @@ import torch
 
 import rsl_rl
 from rsl_rl.algorithms import PPO
-from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, AdaptationModule
+from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, AdaptationModule, EnvParamsEncoder
 from rsl_rl.env import VecEnv
 from rsl_rl.utils import store_code_state
 
@@ -69,9 +69,13 @@ class OnPolicyRunner:
                                                         self.env.num_env_params,
                                                         num_params_latent_dim=8,
                                                         **self.policy_cfg).to(self.device)
+        self.env_params_encoder = EnvParamsEncoder(self.env.num_env_params, 8)
         self.adaptation_module = AdaptationModule(self.env.num_obs, self.env.num_actions, latent_dim=8)
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        self.alg: PPO = alg_class(actor_critic, self.adaptation_module, device=self.device, **self.alg_cfg)
+        self.alg: PPO = alg_class(actor_critic, 
+                                  self.env_params_encoder, 
+                                  self.adaptation_module, 
+                                  device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
         # TODO: parametrize

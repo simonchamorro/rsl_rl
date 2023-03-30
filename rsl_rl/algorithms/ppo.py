@@ -39,6 +39,7 @@ class PPO:
     actor_critic: ActorCritic
     def __init__(self,
                  actor_critic,
+                 env_params_encoder,
                  adaptation_module,
                  num_learning_epochs=1,
                  num_mini_batches=1,
@@ -66,8 +67,13 @@ class PPO:
         self.actor_critic.to(self.device)
         self.adaptation_module = adaptation_module
         self.adaptation_module.to(self.device)
+        self.env_params_encoder = env_params_encoder
+        self.env_params_encoder.to(self.device)
         self.storage = None # initialized later
-        self.optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
+        # TODO: Multiple optimizers?
+        self.optimizer = optim.Adam([{'params': self.actor_critic.parameters()}, 
+                                     {'params': self.env_params_encoder.parameters()}],
+                                     lr=learning_rate)
         self.transition = RolloutStorage.Transition()
 
         # PPO parameters
@@ -87,16 +93,20 @@ class PPO:
 
     def test_mode(self):
         self.actor_critic.test()
+        self.adaptation_module.test()
+        self.env_params_encoder.test()
     
     def train_mode(self):
         self.actor_critic.train()
+        self.adaptation_module.train()
+        self.env_params_encoder.train()
 
-    def act(self, obs, critic_obs, env_params=None):
-        if self.actor_critic.is_recurrent:
-            self.transition.hidden_states = self.actor_critic.get_hidden_states()
+    def act(self, obs, critic_obs, env_params):
+        # Encode env params
+        encoded_params = self.env_params_encoder(env_params)
         # Compute the actions and values
-        self.transition.actions = self.actor_critic.act(obs, env_params).detach()
-        self.transition.values = self.actor_critic.evaluate(critic_obs, env_params).detach()
+        self.transition.actions = self.actor_critic.act(torch.cat((obs, encoded_params), dim=-1)).detach()
+        self.transition.values = self.actor_critic.evaluate(torch.cat((critic_obs, encoded_params), dim=-1)).detach()
         self.transition.actions_log_prob = self.actor_critic.get_actions_log_prob(self.transition.actions).detach()
         self.transition.action_mean = self.actor_critic.action_mean.detach()
         self.transition.action_sigma = self.actor_critic.action_std.detach()
@@ -124,8 +134,9 @@ class PPO:
         self.transition.clear()
         self.actor_critic.reset(dones)
     
-    def compute_returns(self, last_critic_obs, env_params=None):
-        last_values= self.actor_critic.evaluate(last_critic_obs, env_params).detach()
+    def compute_returns(self, last_critic_obs, env_params):
+        encoded_params = self.env_params_encoder(env_params)
+        last_values= self.actor_critic.evaluate(torch.cat((last_critic_obs, encoded_params), dim=-1)).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
     def update(self):
@@ -139,9 +150,10 @@ class PPO:
             returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
 
 
-                self.actor_critic.act(obs_batch, env_params=env_params_batch , masks=masks_batch, hidden_states=hid_states_batch[0])
+                encoded_params_batch = self.env_params_encoder(env_params_batch)
+                self.actor_critic.act(torch.cat((obs_batch, encoded_params_batch), dim=-1), masks=masks_batch, hidden_states=hid_states_batch[0])
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
-                value_batch = self.actor_critic.evaluate(critic_obs_batch, env_params_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
+                value_batch = self.actor_critic.evaluate(torch.cat((critic_obs_batch, encoded_params_batch), dim=-1), masks=masks_batch, hidden_states=hid_states_batch[1])
                 mu_batch = self.actor_critic.action_mean
                 sigma_batch = self.actor_critic.action_std
                 entropy_batch = self.actor_critic.entropy

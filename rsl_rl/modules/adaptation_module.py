@@ -7,7 +7,6 @@ import torch.nn as nn
 from rsl_rl.modules import get_activation
 
 class AdaptationModule(nn.Module):
-    is_recurrent = False
     def __init__(self,  num_obs,
                         num_actions,
                         latent_dim,
