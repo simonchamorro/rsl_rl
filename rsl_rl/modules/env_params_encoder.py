@@ -26,6 +26,7 @@ class EnvParamsEncoder(nn.Module):
         for l in range(len(hidden_dims)):
             if l == len(hidden_dims) - 1:
                 encoder_layers.append(nn.Linear(hidden_dims[l], latent_dim))
+                encoder_layers.append(nn.Tanh())
             else:
                 encoder_layers.append(nn.Linear(hidden_dims[l], hidden_dims[l + 1]))
                 encoder_layers.append(activation)

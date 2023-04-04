@@ -44,7 +44,7 @@ class AdaptationModule(nn.Module):
             nn.ReLU(),
             nn.Conv1d(32, 32, kernel_size=5, stride=1, padding=0))
         # Add non linearities here?
-        self.linear = nn.Linear(32, latent_dim)
+        self.linear = nn.Sequential(nn.Linear(32, latent_dim), nn.Tanh())
         print(f"Adaptation module temporal CNN: {self.temporal_cnn}")
 
         # # Noise. TODO?
