@@ -62,10 +62,11 @@ class AdaptationModule(nn.Module):
     def forward(self, state_action_history):
         # state_action_history (num_envs, num_temporal_steps, num_obs + num_actions)
         mlp_output = self.mlp(state_action_history)
+        mlp_output = mlp_output.permute(0, 2, 1)
         # mlp_output (num_envs, num_temporal_steps, mlp_output_dim)
         cnn_output = self.temporal_cnn(mlp_output)
         # cnn_output (num_envs, 32, 1)
-        latent = self.linear(cnn_output.squeeze(-1))
+        latent = self.linear(cnn_output.flatten(1))
         # latent (num_envs, latent_dim)
         return latent
     
