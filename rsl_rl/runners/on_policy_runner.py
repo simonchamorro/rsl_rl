@@ -79,7 +79,7 @@ class OnPolicyRunner:
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
         # TODO: parametrize
-        self.n_history = 32
+        self.n_history = 64
         self.train_adaptation_every = 20
 
         # init storage and model
