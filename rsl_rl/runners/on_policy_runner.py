@@ -155,7 +155,7 @@ class OnPolicyRunner:
                 start = stop
                 self.alg.compute_returns(critic_obs, env_params, adaptation_module_bool=train_adaptation)
             
-            mean_value_loss, mean_surrogate_loss, adaptation_mse_loss = self.alg.update(adaptation_module_bool=train_adaptation)
+            mean_value_loss, mean_surrogate_loss, encoder_mse_loss, adaptation_mse_loss = self.alg.update(it, adaptation_module_bool=train_adaptation)
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None:
@@ -203,7 +203,6 @@ class OnPolicyRunner:
 
         if locs['train_adaptation']:
             self.writer.add_scalar('Loss/adaptation_module_mse', locs['adaptation_mse_loss'], locs['it'])
-            # self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
 
             str = f" \033[1m Adaptation - Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
             if len(locs['rewbuffer']) > 0:
@@ -234,6 +233,8 @@ class OnPolicyRunner:
             self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
             self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
             self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
+            self.writer.add_scalar('Loss/encoder_mse', locs['encoder_mse_loss'], locs['it'])
+            self.writer.add_scalar('Loss/encoder_mse_lambda', self.alg.encoder_loss_lambda, locs['it'])
 
             str = f" \033[1m Policy - Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
             if len(locs['rewbuffer']) > 0:
@@ -243,6 +244,7 @@ class OnPolicyRunner:
                                 'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                             f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                             f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                            f"""{'Encoder MSE Loss:':>{pad}} {locs['encoder_mse_loss']:.4f}\n"""
                             f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                             f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                             f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
@@ -253,6 +255,7 @@ class OnPolicyRunner:
                                 'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                             f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                             f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                            f"""{'Encoder MSE Loss:':>{pad}} {locs['encoder_mse_loss']:.4f}\n"""
                             f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
 
             log_string += ep_string

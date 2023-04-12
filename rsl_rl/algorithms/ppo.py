@@ -62,6 +62,7 @@ class PPO:
         self.desired_kl = desired_kl
         self.schedule = schedule
         self.learning_rate = learning_rate
+        self.encoder_loss_lambda = 0.0
 
         # PPO components
         self.actor_critic = actor_critic
@@ -156,18 +157,18 @@ class PPO:
         last_values= self.actor_critic.evaluate(torch.cat((last_critic_obs, encoded_params), dim=-1)).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
-    def update(self, adaptation_module_bool=False):
+    def update(self, iteration, adaptation_module_bool=False):
         if adaptation_module_bool:
             self.actor_critic.eval()
             self.env_params_encoder.eval()
             self.adaptation_module.train()
-            mean_value_loss, mean_surrogate_loss, mean_mse_loss = self.update_adaptation_module()
+            mean_value_loss, mean_surrogate_loss, mean_mse_loss_enc, mean_mse_loss_adapt = self.update_adaptation_module()
         else:
             self.actor_critic.train()
             self.env_params_encoder.train()
             self.adaptation_module.eval()
-            mean_value_loss, mean_surrogate_loss, mean_mse_loss = self.update_actor_critic()
-        return mean_value_loss, mean_surrogate_loss, mean_mse_loss
+            mean_value_loss, mean_surrogate_loss, mean_mse_loss_enc, mean_mse_loss_adapt = self.update_actor_critic(iteration=iteration)
+        return mean_value_loss, mean_surrogate_loss, mean_mse_loss_enc, mean_mse_loss_adapt
     
     def update_adaptation_module(self):
         mean_mse_loss = 0
@@ -192,16 +193,17 @@ class PPO:
         mean_mse_loss /= num_updates
         self.storage.clear()
 
-        return None, None, mean_mse_loss
+        return None, None, None, mean_mse_loss
 
-    def update_actor_critic(self):
+    def update_actor_critic(self, iteration):
         mean_value_loss = 0
         mean_surrogate_loss = 0
+        mean_mse_loss_encoder = 0
         generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         for obs_batch, critic_obs_batch, env_params_batch, state_action_history_batch, actions_batch, target_values_batch, advantages_batch, \
             returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
 
-
+                encoded_params_adaptation_module = self.adaptation_module(state_action_history_batch).detach()
                 encoded_params_batch = self.env_params_encoder(env_params_batch)
                 self.actor_critic.act(torch.cat((obs_batch, encoded_params_batch), dim=-1), masks=masks_batch, hidden_states=hid_states_batch[0])
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
@@ -243,7 +245,12 @@ class PPO:
                 else:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
-                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
+                # MSE loss (regularization)
+                self.encoder_loss_lambda =  min([max([ (iteration - 5000) / 5000 , 0]), 1])
+                mse_loss_encoder = F.mse_loss(encoded_params_batch, encoded_params_adaptation_module.detach())
+               
+                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() \
+                     + self.encoder_loss_lambda * mse_loss_encoder
 
                 # Gradient step
                 self.actor_critic_optimizer.zero_grad()
@@ -253,10 +260,13 @@ class PPO:
 
                 mean_value_loss += value_loss.item()
                 mean_surrogate_loss += surrogate_loss.item()
+                mean_mse_loss_encoder += mse_loss_encoder.item()
+
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
+        mean_mse_loss_encoder /= num_updates
         self.storage.clear()
 
-        return mean_value_loss, mean_surrogate_loss, None
+        return mean_value_loss, mean_surrogate_loss, mse_loss_encoder, None
