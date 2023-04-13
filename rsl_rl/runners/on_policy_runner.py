@@ -103,7 +103,7 @@ class OnPolicyRunner:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
         obs = self.env.get_observations()
         privileged_obs = self.env.get_privileged_observations()
-        env_params = self.env.get_adaptation_env_params()
+        env_params, _ = self.env.get_adaptation_env_params()
         critic_obs = privileged_obs if privileged_obs is not None else obs
         obs, critic_obs, env_params = obs.to(self.device), critic_obs.to(self.device), env_params.to(self.device)
         self.alg.actor_critic.train() # switch to train mode (for dropout for example)
