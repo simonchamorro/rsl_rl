@@ -60,6 +60,14 @@ class AdaptationModule(nn.Module):
          enumerate(mod for mod in sequential if isinstance(mod, nn.Linear))]
 
     def forward(self, state_action_history):
+        if len(state_action_history.shape) == 3:
+            return self.forward_batch(state_action_history)
+        elif len(state_action_history.shape) == 2:
+            return self.forward_single(state_action_history)
+        else:
+            raise ValueError(f"state_action_history has invalid shape: {state_action_history.shape}")
+
+    def forward_batch(self, state_action_history):        
         # state_action_history (num_envs, num_temporal_steps, num_obs + num_actions)
         mlp_output = self.mlp(state_action_history)
         mlp_output = mlp_output.permute(0, 2, 1)
@@ -69,6 +77,12 @@ class AdaptationModule(nn.Module):
         latent = self.linear(cnn_output.flatten(1))
         # latent (num_envs, latent_dim)
         return latent
+
+    def forward_single(self, state_action_history):
+        mlp_output = self.mlp(state_action_history)
+        mlp_output = mlp_output.permute(1, 0)
+        cnn_output = self.temporal_cnn(mlp_output)
+        return self.linear(cnn_output.flatten(0))
     
     # @property
     # def action_std(self):
