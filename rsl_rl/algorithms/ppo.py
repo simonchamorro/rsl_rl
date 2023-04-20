@@ -105,8 +105,8 @@ class PPO:
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
         # # Bootstrapping on time outs
-        # if 'time_outs' in infos:
-        #     self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
+        if 'time_outs' in infos:
+            self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
 
         # Record the transition
         self.storage.add_transitions(self.transition)
